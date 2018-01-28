@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 import re
 from gensim.models import word2vec
@@ -5,7 +6,14 @@ from gensim.models import word2vec
 data = pd.read_csv('./data/songdata.csv')
 
 def preprocess(text):
-    pass
+    return ' '.join(re.findall(r'\w+', text.lower()))
 
-print(len(data['text']))
+def sentences(lyrics):
+    return list(filter(
+        lambda x: len(x) > 0,
+        [preprocess(s.rstrip()) for s in lyrics.split('\n')]))
+
+i = data['song'].index('Dancing Queen')
+sent = sentences(data['text'][i])
+print(sent)
 
