@@ -1,19 +1,25 @@
 import logging
 import pandas as pd
 import re
-from gensim.models import word2vec
+from util import contractions
+from gensim.models import Word2Vec
 
 data = pd.read_csv('./data/songdata.csv')
 
 def preprocess(text):
-    return ' '.join(re.findall(r'\w+', text.lower()))
+    try:
+        text = contractions.expand(text) if text.index("'") > -1 else text
+    except:
+        pass
+    return re.findall(r'\w+', text.lower())
 
-def sentences(lyrics):
+def text2Sent(lyrics):
     return list(filter(
         lambda x: len(x) > 0,
         [preprocess(s.rstrip()) for s in lyrics.split('\n')]))
 
-i = data['song'].index('Dancing Queen')
-sent = sentences(data['text'][i])
-print(sent)
-
+print('Building sentences...')
+sentences = [text2Sent(song) for song in data['text']][0]
+print('Training word2vec...')
+model = Word2Vec(sentences, workers=4)
+model.save('./data/model')
