@@ -13,11 +13,17 @@ def preprocess(text):
         pass
     return re.findall(r'\w+', text.lower())
 
+# Turn lyrics into list of preprocessed sentences
 def text2Sent(lyrics):
     return list(filter(
         lambda x: len(x) > 0,
         [preprocess(s.rstrip()) for s in lyrics.split('\n')]))
 
+# Turn lyrics into preprocessed word list
+def text2Doc(lyrics):
+    return list(itertools.chain.from_iterable(text2Sent(lyrics)))
+
+# Build list of sentences that can be fed to word2vec
 def buildSentences():
     dataset = []
     for song in data['text']:
