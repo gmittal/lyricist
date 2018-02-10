@@ -5,6 +5,7 @@ import pandas
 import pickle
 import re
 import tfidf
+from tqdm import *
 from gensim.models import Word2Vec
 
 data = pandas.read_csv('./data/songdata.csv') # ~2 million sentences
@@ -49,9 +50,12 @@ sentences = build_sentences(data['text'])
 setup_tfidf()
 
 print('Training word2vec...')
-model = Word2Vec(sentences, workers=4)
+model = Word2Vec(sentences, min_count=1, workers=4)
 model.save('./data/model')
 
-print(doc2vec(data['text'][0], model))
+print('Building song vectors...')
+vec = {data['song'][i]: doc2vec(data['text'][i], model) for i in range(0, len(data['text']))}
+with open('./data/songvec.pickle', 'wb') as handle:
+    pickle.dump(vec, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 print('Done.')
