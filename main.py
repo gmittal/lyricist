@@ -1,5 +1,4 @@
 from util import contractions
-import functools
 import itertools
 import pandas
 import pickle
@@ -32,29 +31,24 @@ def build_sentences(_data):
     dataset = []
     for song in _data:
         dataset += text2sent(song)
+        tfidf.add(text2doc(song))
     return dataset
-
-# Create tfidf model
-def setup_tfidf():
-    for song in data['text']:
-        tfidf.init(text2doc(song))
 
 # Turn lyrics into a document vector
 def doc2vec(_lyrics, _model):
     processed = text2doc(_lyrics)
-    return functools.reduce(lambda x, y: x + y,
-        map(lambda z: tfidf.tfidf(z, processed) * _model[z], processed))
+    return sum(map(lambda z: tfidf.tfidf(z, processed) * _model[z], processed))
 
 print('Building sentences...')
-sentences = build_sentences(data['text'])
-setup_tfidf()
+sentences = build_sentences(data['text'][:1000])
+tfidf.init()
 
 print('Training word2vec...')
 model = Word2Vec(sentences, min_count=1, workers=4)
 model.save('./data/model')
 
 print('Building song vectors...')
-vec = {data['song'][i]: doc2vec(data['text'][i], model) for i in range(0, len(data['text']))}
+vec = {data['song'][i]: doc2vec(data['text'][i], model) for i in tqdm(range(0, len(data['text'][:1000])))}
 with open('./data/songvec.pickle', 'wb') as handle:
     pickle.dump(vec, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
