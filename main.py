@@ -40,7 +40,7 @@ def doc2vec(_lyrics, _model):
     return sum(map(lambda z: tfidf.tfidf(z, processed) * _model[z], processed))
 
 print('Building sentences...')
-sentences = build_sentences(data['text'])
+sentences = build_sentences(data['text'][:5000])
 tfidf.init()
 
 print('Training word2vec...')
@@ -48,7 +48,7 @@ model = Word2Vec(sentences, min_count=1, workers=4)
 model.save('./data/model')
 
 print('Building song vectors...')
-vec = {data['song'][i]: doc2vec(data['text'][i], model) for i in tqdm(range(0, len(data['text'])))}
+vec = {data['song'][i]: doc2vec(data['text'][i], model) for i in tqdm(range(0, len(data['text'][:5000])))}
 with open('./data/songvec.pickle', 'wb') as handle:
     pickle.dump(vec, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
