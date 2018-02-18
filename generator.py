@@ -1,99 +1,117 @@
+import random
 import numpy as np
+import tensorflow as tf
 
-# data I/O
-data = open('input.txt', 'r').read() # should be simple plain text file
-chars = list(set(data))
+seed_value = 42
+tf.set_random_seed(seed_value)
+random.seed(seed_value)
+
+def one_hot(v):
+    return np.eye(vocab_size)[v]
+
+# Data I/O
+data = open('./data/lyrics.txt', 'r').read()  # Use this source file as input for RNN
+chars = sorted(list(set(data)))
 data_size, vocab_size = len(data), len(chars)
-print 'data has %d characters, %d unique.' % (data_size, vocab_size)
-char_to_ix = { ch:i for i,ch in enumerate(chars) }
-ix_to_char = { i:ch for i,ch in enumerate(chars) }
+print('Data has %d characters, %d unique.' % (data_size, vocab_size))
+char_to_ix = {ch: i for i, ch in enumerate(chars)}
+ix_to_char = {i: ch for i, ch in enumerate(chars)}
 
-# hyperparameters
-hidden_size = 100 # size of hidden layer of neurons
-seq_length = 25 # number of steps to unroll the RNN for
+# Hyper-parameters
+hidden_size   = 100  # hidden layer's size
+seq_length    = 25   # number of steps to unroll
 learning_rate = 1e-1
 
-# model parameters
-Wxh = np.random.randn(hidden_size, vocab_size)*0.01 # input to hidden
-Whh = np.random.randn(hidden_size, hidden_size)*0.01 # hidden to hidden
-Why = np.random.randn(vocab_size, hidden_size)*0.01 # hidden to output
-bh = np.zeros((hidden_size, 1)) # hidden bias
-by = np.zeros((vocab_size, 1)) # output bias
+inputs     = tf.placeholder(shape=[None, vocab_size], dtype=tf.float32, name="inputs")
+targets    = tf.placeholder(shape=[None, vocab_size], dtype=tf.float32, name="targets")
+init_state = tf.placeholder(shape=[1, hidden_size], dtype=tf.float32, name="state")
 
-def lossFun(inputs, targets, hprev):
-  xs, hs, ys, ps = {}, {}, {}, {}
-  hs[-1] = np.copy(hprev)
-  loss = 0
-  # forward pass
-  for t in xrange(len(inputs)):
-    xs[t] = np.zeros((vocab_size,1)) # encode in 1-of-k representation
-    xs[t][inputs[t]] = 1
-    hs[t] = np.tanh(np.dot(Wxh, xs[t]) + np.dot(Whh, hs[t-1]) + bh) # hidden state
-    ys[t] = np.dot(Why, hs[t]) + by # unnormalized log probabilities for next chars
-    ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t])) # probabilities for next chars
-    loss += -np.log(ps[t][targets[t],0]) # softmax (cross-entropy loss)
-  # backward pass: compute gradients going backwards
-  dWxh, dWhh, dWhy = np.zeros_like(Wxh), np.zeros_like(Whh), np.zeros_like(Why)
-  dbh, dby = np.zeros_like(bh), np.zeros_like(by)
-  dhnext = np.zeros_like(hs[0])
-  for t in reversed(xrange(len(inputs))):
-    dy = np.copy(ps[t])
-    dy[targets[t]] -= 1 # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad if confused here
-    dWhy += np.dot(dy, hs[t].T)
-    dby += dy
-    dh = np.dot(Why.T, dy) + dhnext # backprop into h
-    dhraw = (1 - hs[t] * hs[t]) * dh # backprop through tanh nonlinearity
-    dbh += dhraw
-    dWxh += np.dot(dhraw, xs[t].T)
-    dWhh += np.dot(dhraw, hs[t-1].T)
-    dhnext = np.dot(Whh.T, dhraw)
-  for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
-    np.clip(dparam, -5, 5, out=dparam) # clip to mitigate exploding gradients
-  return loss, dWxh, dWhh, dWhy, dbh, dby, hs[len(inputs)-1]
+initializer = tf.random_normal_initializer(stddev=0.1)
 
-def sample(h, seed_ix, n):
-  x = np.zeros((vocab_size, 1))
-  x[seed_ix] = 1
-  ixes = []
-  for t in xrange(n):
-    h = np.tanh(np.dot(Wxh, x) + np.dot(Whh, h) + bh)
-    y = np.dot(Why, h) + by
-    p = np.exp(y) / np.sum(np.exp(y))
-    ix = np.random.choice(range(vocab_size), p=p.ravel())
-    x = np.zeros((vocab_size, 1))
-    x[ix] = 1
-    ixes.append(ix)
-  return ixes
+with tf.variable_scope("RNN") as scope:
+    hs_t = init_state
+    ys = []
+    for t, xs_t in enumerate(tf.split(inputs, seq_length, axis=0)):
+        if t > 0: scope.reuse_variables()  # Reuse variables
+        Wxh = tf.get_variable("Wxh", [vocab_size, hidden_size], initializer=initializer)
+        Whh = tf.get_variable("Whh", [hidden_size, hidden_size], initializer=initializer)
+        Why = tf.get_variable("Why", [hidden_size, vocab_size], initializer=initializer)
+        bh  = tf.get_variable("bh", [hidden_size], initializer=initializer)
+        by  = tf.get_variable("by", [vocab_size], initializer=initializer)
 
+        hs_t = tf.tanh(tf.matmul(xs_t, Wxh) + tf.matmul(hs_t, Whh) + bh)
+        ys_t = tf.matmul(hs_t, Why) + by
+        ys.append(ys_t)
+
+hprev = hs_t
+output_softmax = tf.nn.softmax(ys[-1])  # Get softmax for sampling
+
+outputs = tf.concat(ys, axis=0)
+loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=targets, logits=outputs))
+
+# Minimizer
+minimizer = tf.train.AdamOptimizer()
+grads_and_vars = minimizer.compute_gradients(loss)
+
+# Gradient clipping
+grad_clipping = tf.constant(5.0, name="grad_clipping")
+clipped_grads_and_vars = []
+for grad, var in grads_and_vars:
+    clipped_grad = tf.clip_by_value(grad, -grad_clipping, grad_clipping)
+    clipped_grads_and_vars.append((clipped_grad, var))
+
+# Gradient updates
+updates = minimizer.apply_gradients(clipped_grads_and_vars)
+
+# Session
+sess = tf.Session()
+init = tf.global_variables_initializer()
+sess.run(init)
+
+# Initial values
 n, p = 0, 0
-mWxh, mWhh, mWhy = np.zeros_like(Wxh), np.zeros_like(Whh), np.zeros_like(Why)
-mbh, mby = np.zeros_like(bh), np.zeros_like(by) # memory variables for Adagrad
-smooth_loss = -np.log(1.0/vocab_size)*seq_length # loss at iteration 0
+hprev_val = np.zeros([1, hidden_size])
+
 while True:
-  # prepare inputs (we're sweeping from left to right in steps seq_length long)
-  if p+seq_length+1 >= len(data) or n == 0:
-    hprev = np.zeros((hidden_size,1)) # reset RNN memory
-    p = 0 # go from start of data
-  inputs = [char_to_ix[ch] for ch in data[p:p+seq_length]]
-  targets = [char_to_ix[ch] for ch in data[p+1:p+seq_length+1]]
+    # Initialize
+    if p + seq_length + 1 >= len(data) or n == 0:
+        hprev_val = np.zeros([1, hidden_size])
+        p = 0  # reset
 
-  # sample from the model now and then
-  if n % 100 == 0:
-    sample_ix = sample(hprev, inputs[0], 200)
-    txt = ''.join(ix_to_char[ix] for ix in sample_ix)
-    print '----\n %s \n----' % (txt, )
+    # Prepare inputs
+    input_vals  = [char_to_ix[ch] for ch in data[p:p + seq_length]]
+    target_vals = [char_to_ix[ch] for ch in data[p + 1:p + seq_length + 1]]
 
-  # forward seq_length characters through the net and fetch gradient
-  loss, dWxh, dWhh, dWhy, dbh, dby, hprev = lossFun(inputs, targets, hprev)
-  smooth_loss = smooth_loss * 0.999 + loss * 0.001
-  if n % 100 == 0: print 'iter %d, loss: %f' % (n, smooth_loss) # print progress
+    input_vals  = one_hot(input_vals)
+    target_vals = one_hot(target_vals)
 
-  # perform parameter update with Adagrad
-  for param, dparam, mem in zip([Wxh, Whh, Why, bh, by],
-                                [dWxh, dWhh, dWhy, dbh, dby],
-                                [mWxh, mWhh, mWhy, mbh, mby]):
-    mem += dparam * dparam
-    param += -learning_rate * dparam / np.sqrt(mem + 1e-8) # adagrad update
+    hprev_val, loss_val, _ = sess.run([hprev, loss, updates],
+                                      feed_dict={inputs: input_vals,
+                                                 targets: target_vals,
+                                                 init_state: hprev_val})
+    if n % 500 == 0:
+        # Progress
+        print('iter: %d, p: %d, loss: %f' % (n, p, loss_val))
 
-  p += seq_length # move data pointer
-  n += 1 # iteration counter
+        # Do sampling
+        sample_length = 200
+        start_ix      = random.randint(0, len(data) - seq_length)
+        sample_seq_ix = [char_to_ix[ch] for ch in data[start_ix:start_ix + seq_length]]
+        ixes          = []
+        sample_prev_state_val = np.copy(hprev_val)
+
+        for t in range(sample_length):
+            sample_input_vals = one_hot(sample_seq_ix)
+            sample_output_softmax_val, sample_prev_state_val = \
+                sess.run([output_softmax, hprev],
+                         feed_dict={inputs: sample_input_vals, init_state: sample_prev_state_val})
+
+            ix = np.random.choice(range(vocab_size), p=sample_output_softmax_val.ravel())
+            ixes.append(ix)
+            sample_seq_ix = sample_seq_ix[1:] + [ix]
+
+        txt = ''.join(ix_to_char[ix] for ix in ixes)
+        print('----\n %s \n----\n' % (txt,))
+
+    p += seq_length
+    n += 1
