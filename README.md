@@ -13,3 +13,6 @@ python evaluate.py
 
 ### Generation
 The lyric generator uses a variant of [Karpathy's char-rnn](https://karpathy.github.io/2015/05/21/rnn-effectiveness/).
+```
+python generator.py
+```
